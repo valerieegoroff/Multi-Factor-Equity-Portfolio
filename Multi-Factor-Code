@@ -1,0 +1,83 @@
+# Importing necessary libraries for data handling, analysis, and plotting
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import yfinance as yf
+
+# Selected 15 diversified S&P 500 tickers across sectors
+tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'JPM', 'UNH', 'XOM', 'PG', 'PFE', 'WMT', 'MCD', 'LOW', 'NFLX']
+
+# Download historical adjusted close prices
+price_data = yf.download(tickers, start='2015-01-01', end='2025-01-01', auto_adjust=True)['Close']
+
+# Preview
+price_data.head()
+
+# Pulling latest available fundamental data using yfinance
+fundamentals = {}
+
+for ticker in tickers:
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    fundamentals[ticker] = {
+        'beta': info.get('beta', np.nan),
+        'marketCap': info.get('marketCap', np.nan),
+        'trailingPE': info.get('trailingPE', np.nan)
+    }
+
+# Convert to DataFrame
+fundamentals_df = pd.DataFrame(fundamentals).T
+fundamentals_df.head()
+
+# Calculating 12-month trailing returns (~252 trading days)
+momentum_score = price_data.pct_change(252).iloc[-1]
+
+# Adding momentum to the fundamentals dataframe
+fundamentals_df['momentum'] = momentum_score
+fundamentals_df.head()
+
+# Standardizing all factor exposures (Z-scores)
+factors = ['beta', 'marketCap', 'trailingPE', 'momentum']
+
+# Negative for size and value because smaller and cheaper are preferred
+fundamentals_df['Size_Score'] = -fundamentals_df['marketCap']
+fundamentals_df['Value_Score'] = -fundamentals_df['trailingPE']
+fundamentals_df['Momentum_Score'] = fundamentals_df['momentum']
+fundamentals_df['Market_Score'] = fundamentals_df['beta']  # Higher beta = higher market exposure
+
+# Z-score standardization
+for factor in ['Market_Score', 'Size_Score', 'Value_Score', 'Momentum_Score']:
+    fundamentals_df[factor] = (fundamentals_df[factor] - fundamentals_df[factor].mean()) / fundamentals_df[factor].std()
+
+fundamentals_df.head()
+
+# Creating a simple equal-weight composite factor score
+fundamentals_df['Composite_Score'] = fundamentals_df[['Market_Score', 'Size_Score', 'Value_Score', 'Momentum_Score']].mean(axis=1)
+
+# Ranking stocks by composite score
+fundamentals_df.sort_values('Composite_Score', ascending=False).head()
+
+# Selecting top 5 stocks based on Composite Score
+top_stocks = fundamentals_df.sort_values('Composite_Score', ascending=False).head(5).index.tolist()
+
+# Subsetting price data for selected stocks
+portfolio_prices = price_data[top_stocks]
+
+# Calculating daily returns
+portfolio_returns = portfolio_prices.pct_change().dropna()
+
+# Equal weighting across selected stocks
+portfolio_returns = portfolio_returns.mean(axis=1)
+
+# Calculating cumulative portfolio returns
+cumulative_returns = (1 + portfolio_returns).cumprod()
+
+# Plotting cumulative returns
+plt.figure(figsize=(12,6))
+plt.plot(cumulative_returns, label='Multi-Factor Portfolio', linewidth=2)
+plt.title('Cumulative Returns: Multi-Factor Equity Portfolio (2015-2025)', fontsize=14)
+plt.xlabel('Date')
+plt.ylabel('Portfolio Value')
+plt.legend()
+plt.grid(True)
+plt.show()
